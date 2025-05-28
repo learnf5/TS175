@@ -28,7 +28,7 @@ Notes, build scripts, and associated files for the Troubleshooing BIG-IP version
 |TS175-C08L01-PROJECT|8     |8     |4   |0.5            |
 |TS175-C09L01-UPGRADE|8     |8     |4   |0.5            |
 
-Lab Number, Name, Duration (hr), Series and VLANs
+## Lab Number, Name, Duration (hr), Series and VLANs
 
 |Number                  |Name                                        |Duration|Series   |Mgmt|External|Internal|
 |------------------------|--------------------------------------------|-------:|---------|:--:|:------:|:------:|
