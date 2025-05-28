@@ -16,6 +16,6 @@ sudo scp /home/student/Downloads/$iApp 192.168.1.31:/shared/tmp
 sudo ssh 192.168.1.31 tmsh load /sys application template /shared/tmp/$iApp
 sudo ssh 192.168.1.31 tmsh save /sys config
 
-# run this lab's specific tasks saved on GitHub
-curl --silent --output /tmp/$LAB_ID.sh https://raw.githubusercontent.com/learnf5/$COURSE_ID/main/$LAB_ID.sh
-bash -x /tmp/$LAB_ID.sh
+# add static routes to training server and jump host
+sudo ssh 192.168.1.31 -t ssh 172.16.20.1 /etc/f5_routes/routes.3dns.172
+sudo ip route add 172.16.0.0/16 via 10.10.1.33
