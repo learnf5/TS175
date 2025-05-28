@@ -1,0 +1,321 @@
+#TMSH-VERSION: 16.1.0
+
+cli admin-partitions {
+    update-partition Common
+}
+sys application template /Common/TS_ClassSetup {
+    actions {
+        definition {
+            html-help {
+            }
+            implementation {
+#
+####################################################
+# version 16.1.0                                   #
+#                                                  #
+# Base set of objects installed on trainX_base.ucs #
+#                                                  #
+####################################################
+set MGMT [tmsh::get_config sys management-ip]
+set left [string first "192.168." $MGMT]
+set left [expr { $left + 8 }]
+set right [string last "." $MGMT]
+set right [expr { $right - 1 }]
+set student [string range $MGMT $left $right]
+tmsh::modify "/sys application service $tmsh::app_name strict-updates disabled"
+tmsh::create "/ltm node /Common/172.16.20.1 address 172.16.20.1"
+tmsh::create "/ltm node /Common/172.16.20.2 address 172.16.20.2"
+tmsh::create "/ltm node /Common/172.16.20.3 address 172.16.20.3"
+set irule_buffer [string trim " { 
+ when CLIENT_ACCEPTED {
+  if { \[LB::server pool\] equals \"\" } { log local0.crit \"\[IP::client_addr\]: No pool assigned to virtual \[virtual\]\"
+   } else { log local0. \"\[IP::client_addr\]: Connected to VS \[virtual\] which is using pool \[LB::server pool\]\"
+    }
+   }
+ when SERVER_CONNECTED {
+  log local0. \"\[IP::client_addr\]: Connected to backend server \[LB::server addr\]:\[LB::server port\]\"
+ }
+}"]
+tmsh::create "/ltm rule /Common/LOG_traffic_rule $irule_buffer"
+tmsh::create "/ltm monitor http /Common/HTTP_mon recv 'Server \[1-3\]' send 'GET /\\r\\n'"
+tmsh::create "/ltm pool /Common/HTTP_pool monitor /Common/HTTP_mon members add { 172.16.20.1:80 172.16.20.2:80 172.16.20.3:80 }" 
+tmsh::create "/ltm pool /Common/FTP_pool monitor tcp members add { 172.16.20.1:21 172.16.20.2:21 172.16.20.3:21 }"
+tmsh::create "/ltm pool /Common/SSH_pool monitor tcp members add { 172.16.20.1:22 172.16.20.2:22 172.16.20.3:22 }"
+tmsh::create "/ltm pool /Common/HTTPS_pool monitor https members add { 172.16.20.1:443 172.16.20.2:443 172.16.20.3:443 }"
+tmsh::create "/ltm persistence source-addr /Common/CONFIGLTM_src_persist default-from source_addr mask 255.255.0.0 "
+tmsh::create "/ltm virtual /Common/FTP_vs destination 10.10.$student.100:21 pool FTP_pool profiles add { tcp ftp }"
+tmsh::create "/ltm virtual /Common/SSH_vs destination 10.10.$student.100:22 pool SSH_pool profiles add { tcp }"
+tmsh::create "/ltm virtual /Common/HTTP_vs destination 10.10.$student.100:80 pool HTTP_pool profiles add { tcp http }"
+tmsh::create "/ltm virtual /Common/HTTPS_vs destination 10.10.$student.100:443 pool HTTPS_pool profiles add { tcp } persist replace-all-with { CONFIGLTM_src_persist }"
+
+##################################################
+# modifications for labs                         #
+##################################################
+
+switch $::class__lab {
+"iHealth" {
+   tmsh::create "/net vlan UPLINK_vlan"
+   tmsh::create "/net self UPLINK_ip address 10.20.$student.40/16 vlan UPLINK_vlan" 
+   tmsh::create "/ltm monitor https /Common/HTTPS_ts_mon defaults-from https recv \"Server\[1-3\]\""
+   tmsh::create "/ltm pool /Common/TEST_pool2 monitor http members add {172.16.20.1:80 {ratio 1 priority-group 0} 172.16.20.2:80 {ratio 1 priority-group 0} 172.16.20.3:80 {ratio 1 priority-group 0}}"
+   tmsh::modify "/ltm pool /Common/HTTP_pool members modify {172.16.20.1:80 {ratio 1} 172.16.20.2:80 {ratio 1} 172.16.20.3:80 {ratio 1}}"
+   tmsh::modify "/ltm pool /Common/HTTPS_pool min-active-members 2"
+
+   # We need to create a user with the default password.
+   # Strict password enforcement will not allow us to do that, so we must first
+   # turn off strict password enforcement.
+   tmsh::modify "/sys db users.strictpasswords value disable"
+
+   # Now that the password enforcement is disabled, we can create a user with the
+   # default password.
+   tmsh::create "/auth user USER_other partition-access add { all-partitions { role admin } } password default shell bash"
+
+   # Save a filename and the command in variables.
+   set filename "/config/Create_User"
+   set script_data "tmsh modify /sys db users.strictpasswords value enable\n"
+
+   # Check to see if the file exists.
+   # Delete it if it exists.
+   set result [file exists $filename]
+   if {$result == 1}  {
+     file delete $filename
+   }
+
+   # Prepend the shebang to the beginning of the set of commands, and add a
+   # sleep timer.
+   # 0 exit code to append to the end.
+   set shebang "#!/bin/bash\nsleep 3\n"
+   set exit_code "exit 0\n"
+   append shebang $script_data $exit_code
+
+   # Open the file for writing.
+   set fileID [open $filename "w"]
+   # Write the data to the file.
+   puts -nonewline $fileID $shebang
+   # Close the file.
+   close $fileID
+   # Set the permissions for the file.
+   file attributes $filename -permissions 0755
+   exec /bin/bash $filename &
+
+
+   tmsh::modify "/sys db connection.autolasthop value disable"
+}
+
+"Lower Layer" { 
+   tmsh::modify "/ltm virtual /Common/FTP_vs source-address-translation { type automap } "
+   tmsh::modify "/ltm virtual /Common/SSH_vs source-address-translation { type automap } "
+   tmsh::modify "/ltm virtual /Common/HTTP_vs source-address-translation { type automap } "
+   tmsh::modify "/ltm virtual /Common/HTTPS_vs source-address-translation { type automap } "
+   tmsh::modify "/net interface 1.3 enabled"
+   tmsh::modify "/net vlan /Common/external interfaces none"
+   tmsh::create "/net vlan /Common/UPLINK_vlan interfaces add { 1.1 {untagged} }"
+   tmsh::create "/net self 10.20.$student.40/16 address 10.20.$student.40/16 vlan UPLINK_vlan"  
+   tmsh::delete "/net self /Common/172.16.$student.33 "
+ }
+
+"Cleanup Lower Layer" {
+   # Save a filename and the command in variables.
+   set filename "/config/Fix_SelfIP"
+   set script_data "tmsh modify /net vlan /Common/external interfaces none \n"
+   append script_data "tmsh modify /net vlan /Common/external interfaces add { 1.1 {untagged} } \n"
+   append script_data "tmsh create /net self /Common/172.16.$student.33 address 172.16.$student.33/16 vlan internal traffic-group traffic-group-1 \n"
+
+
+   # Check to see if the file exists.
+   # Delete it if it exists.
+   set result [file exists $filename]
+   if {$result == 1}  {
+     file delete $filename
+   }
+
+   # Prepend the shebang to the beginning of the set of commands, and add a
+   # sleep timer.
+   # 0 exit code to append to the end.
+   set shebang "#!/bin/bash\nsleep 3\n"
+   set exit_code "exit 0\n"
+   append shebang $script_data $exit_code
+
+   # Open the file for writing.
+   set fileID [open $filename "w"]
+   # Write the data to the file.
+   puts -nonewline $fileID $shebang
+   # Close the file.
+   close $fileID
+   # Set the permissions for the file.
+   file attributes $filename -permissions 0755
+   exec /bin/bash $filename &
+ }
+
+"tcpdump" { 
+   tmsh::modify "/net vlan /Common/internal interfaces modify { 1.2 {untagged} }"
+ }
+
+"Capture and Analysis" {
+   tmsh::create "/ltm pool /Common/MZ_pool monitor http members add {172.16.20.1:80}"
+   tmsh::create "/ltm pool /Common/IE_pool monitor http members add {172.16.20.2:80}"
+   tmsh::create "/ltm pool /Common/TS_pool3 monitor http members add {172.16.20.3:80}"
+   set irule_buffer [string trim "{ 
+    when HTTP_REQUEST {
+     if { \[HTTP::uri\] eq \"/\" } { HTTP::uri /browserspecific.html }
+     if { \[HTTP::header user-agent\] contains \"Mozilla\" } { pool MZ_pool
+       } elseif { \[HTTP::header user-agent\] contains \"Trident\" } { pool IE_pool 
+      }
+     }
+   }"]
+   tmsh::create "/ltm rule /Common/BROWSER_type_rule $irule_buffer"
+   tmsh::create "/ltm virtual /Common/BROWSER_type_vs destination 10.10.$student.105:80 ip-protocol tcp pool TS_pool3 profiles add {tcp http} rules {BROWSER_type_rule}"
+ } 
+
+"Logging 1" {
+   tmsh::create "/ltm virtual /Common/LOG_105_vs destination 10.10.$student.105:80 ip-protocol tcp "
+ }
+
+"Logging 2" {
+   tmsh::modify "/ltm virtual /Common/HTTPS_vs pool HTTP_pool"
+ }
+
+"8.1" { 
+   tmsh::modify "/ltm pool /Common/HTTP_pool monitor http "
+ }
+
+"8.2" { 
+   tmsh::modify "/ltm pool /Common/HTTP_pool monitor http "
+ }
+
+"8.3" {
+   tmsh::modify "/ltm virtual /Common/FTP_vs profiles replace-all-with { tcp } " 
+ }
+
+"8.4" {
+   tmsh::modify "/ltm virtual /Common/HTTPS_vs profiles replace-all-with { tcp http } "
+ }
+
+"8.5" {
+   tmsh::modify "/ltm virtual /Common/HTTP_vs translate-address disabled "
+ }
+
+ "8.6" {
+   # Save a filename and the command in variables.
+   set filename "/config/Create_Partition"
+   set script_data "tmsh create /auth partition WORKA\n"
+   append script_data "tmsh create /auth partition WORKB\n"
+   append script_data "tmsh cd /WORKA\n"
+   append script_data "tmsh create /auth user managera {partition-access add {WORKA {role manager}} shell tmsh password f5trnX}\n"
+   append script_data "tmsh create /ltm monitor http /WORKA/WORKA_HTTP_mon recv 'Server \[1-3\]' send 'GET /\\r\\n'\n"
+   append script_data "tmsh create /ltm pool /WORKA/WORKA_HTTP_pool monitor /WORKA/WORKA_HTTP_mon members add {172.16.20.1:80 {ratio 1 priority-group 0} 172.16.20.2:80 {ratio 1 priority-group 0} 172.16.20.3:80 {ratio 1 priority-group 0}}\n"
+   append script_data "tmsh create /ltm virtual /WORKA/WORKA_HTTP_vs destination 10.10.$student.105:80 pool /WORKA/WORKA_HTTP_pool profiles add { tcp http }\n"
+   append script_data "tmsh cd /WORKB\n"
+   append script_data "tmsh create /auth user managerb {partition-access add {WORKB {role manager}} shell tmsh password f5trnX}\n"
+   append script_data "tmsh create /ltm virtual /WORKB/WORKB_HTTP_vs destination 10.10.$student.110:80 pool HTTP_pool profiles add { tcp http }\n"
+
+   # Check to see if the file exists.
+   # Delete it if it exists.
+   set result [file exists $filename]
+   if {$result == 1} {
+     file delete $filename
+   }
+
+   # Prepend the shebang to the beginning of the set of commands, and add a
+   # sleep timer.
+   # 0 exit code to append to the end.
+   set shebang "#!/bin/bash\nsleep 3\n"
+   set exit_code "exit 0\n"
+   append shebang $script_data $exit_code
+
+   # Open the file for writing.
+   set fileID [open $filename "w"]
+   # Write the data to the file.
+   puts -nonewline $fileID $shebang
+   # Close the file.
+   close $fileID
+   # Set the permissions for the file.
+   file attributes $filename -permissions 0755
+   exec /bin/bash $filename &
+ }
+
+"Cleanup 8.6" {
+   # Save a filename and the command in variables.
+   set filename "/config/Delete_Partition"
+   # Delete WORKA objects
+   set script_data "tmsh delete /ltm virtual /WORKA/WORKA_HTTP_vs \n"
+   append script_data "tmsh delete /ltm pool /WORKA/WORKA_HTTP_pool \n"
+   append script_data "tmsh delete /ltm monitor http /WORKA/WORKA_HTTP_mon \n"
+   append script_data "tmsh delete /auth user managera \n"
+   # Delete WORKB objects
+   append script_data "tmsh delete /ltm virtual /WORKB/WORKB_HTTP_vs \n"
+   append script_data "tmsh delete /auth user managerb \n"
+   append nsleep 3
+   # Delete partitions
+   append script_data "tmsh delete /auth partition WORKA\n"
+   append script_data "tmsh delete /auth partition WORKB\n"
+
+   # Check to see if the file exists.
+   # Delete it if it exists.
+   set result [file exists $filename]
+   if {$result == 1}  {
+     file delete $filename
+   }
+
+   # Prepend the shebang to the beginning of the set of commands, and add a
+   # sleep timer.
+   # 0 exit code to append to the end.
+   set shebang "#!/bin/bash\nsleep 3\n"
+   set exit_code "exit 0\n"
+   append shebang $script_data $exit_code
+
+   # Open the file for writing.
+   set fileID [open $filename "w"]
+   # Write the data to the file.
+   puts -nonewline $fileID $shebang
+   # Close the file.
+   close $fileID
+   # Set the permissions for the file.
+   file attributes $filename -permissions 0755
+   exec /bin/bash $filename &
+ }
+
+ "8.7" {
+   tmsh::modify "/net vlan /Common/internal interfaces modify { 1.2 {tagged} }"
+ }
+
+"8.8" {
+   tmsh::create "/net vlan /Common/VLAN_users { interfaces replace-all-with { 1.3 {untagged} }}"
+   tmsh::create "/net self /Common/10.20.$student.31 address 10.20.$student.31/16 vlan VLAN_users allow-service all"
+   tmsh::create "/ltm virtual /Common/FWD_172_vs destination 172.17.$student.0:any mask 255.255.255.0 ip-forward ip-protocol tcp "
+   tmsh::create "/ltm virtual-address /Common/172.17.$student.0 arp enabled icmp-echo enabled "
+ }
+
+"8.9" {
+   tmsh::create "/net vlan /Common/VLAN_users { interfaces replace-all-with { 1.3 {untagged} }}"
+   tmsh::create "/net self /Common/10.20.$student.31 address 10.20.$student.31/16 vlan VLAN_users allow-service all"
+   tmsh::create "/ltm snat /Common/SNAT_10 automap origins add {10.0.0.0/8}"
+   tmsh::create "/ltm virtual /Common/FWD_10_vs destination 172.16.0.0:any mask 255.255.0.0 ip-forward ip-protocol tcp "
+ }
+}
+            }
+            macro {
+            }
+            presentation {
+                section class {
+ choice lab { "iHealth", "Lower Layer", "Cleanup Lower Layer", "tcpdump", "Capture and Analysis", "Logging 1", "Logging 2", "8.1", "8.2", "8.3", "8.4", "8.5", "8.6", "8.7", "8.8", "8.9", "Cleanup 8.6" }
+}
+text
+{
+  class "Lab Options"
+  class.lab "Choose a Lab Setup"
+}
+            }
+            role-acl none
+            run-as none
+        }
+    }
+    description none
+    ignore-verification false
+    requires-bigip-version-max none
+    requires-bigip-version-min none
+    requires-modules none
+    signing-key none
+    tmpl-checksum none
+    tmpl-signature none
+}

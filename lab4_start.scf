@@ -1,0 +1,135 @@
+#TMSH-VERSION: 17.1.0
+
+ltm node /Common/172.16.20.1 {
+    address 172.16.20.1
+}
+ltm node /Common/172.16.20.2 {
+    address 172.16.20.2
+}
+ltm node /Common/172.16.20.3 {
+    address 172.16.20.3
+}
+ltm pool /Common/http_pool {
+    description "HTTP with ratio load balancing"
+    load-balancing-mode ratio-member
+    members {
+        /Common/172.16.20.1:80 {
+            address 172.16.20.1
+        }
+        /Common/172.16.20.2:80 {
+            address 172.16.20.2
+            ratio 2
+        }
+        /Common/172.16.20.3:80 {
+            address 172.16.20.3
+            ratio 3
+        }
+    }
+    monitor /Common/configltm_http_mon
+}
+ltm pool /Common/https_pool {
+    members {
+        /Common/172.16.20.1:443 {
+            address 172.16.20.1
+        }
+        /Common/172.16.20.2:443 {
+            address 172.16.20.2
+        }
+        /Common/172.16.20.3:443 {
+            address 172.16.20.3
+        }
+    }
+    monitor /Common/https
+}
+ltm pool /Common/ssh_pool {
+    members {
+        /Common/172.16.20.1:22 {
+            address 172.16.20.1
+        }
+        /Common/172.16.20.2:22 {
+            address 172.16.20.2
+        }
+        /Common/172.16.20.3:22 {
+            address 172.16.20.3
+        }
+    }
+    monitor /Common/tcp
+}
+ltm virtual /Common/http_vs {
+    creation-time 2022-01-02:12:36:04
+    destination /Common/10.10.1.100:80
+    ip-protocol tcp
+    last-modified-time 2022-01-02:12:36:04
+    mask 255.255.255.255
+    pool /Common/http_pool
+    profiles {
+        /Common/http { }
+        /Common/tcp { }
+    }
+    serverssl-use-sni disabled
+    source 0.0.0.0/0
+    source-address-translation {
+        type automap
+    }
+    translate-address enabled
+    translate-port enabled
+}
+ltm virtual /Common/https_vs {
+    creation-time 2022-01-03:08:07:34
+    destination /Common/10.10.1.100:443
+    ip-protocol tcp
+    last-modified-time 2022-01-03:08:07:34
+    mask 255.255.255.255
+    persist {
+        /Common/configltm_src_persist {
+            default yes
+        }
+    }
+    pool /Common/https_pool
+    profiles {
+        /Common/tcp { }
+    }
+    serverssl-use-sni disabled
+    source 0.0.0.0/0
+    translate-address enabled
+    translate-port enabled
+}
+ltm virtual /Common/ssh_vs {
+    creation-time 2022-01-03:08:07:34
+    destination /Common/10.10.1.100:22
+    ip-protocol tcp
+    last-modified-time 2022-01-03:08:07:34
+    mask 255.255.255.255
+    pool /Common/ssh_pool
+    profiles {
+        /Common/tcp { }
+    }
+    serverssl-use-sni disabled
+    source 0.0.0.0/0
+    translate-address enabled
+    translate-port enabled
+}
+ltm virtual-address /Common/10.10.1.100 {
+    address 10.10.1.100
+    arp enabled
+    icmp-echo enabled
+    mask 255.255.255.255
+    traffic-group /Common/traffic-group-1
+}
+ltm monitor http /Common/configltm_http_mon {
+    adaptive disabled
+    defaults-from /Common/http
+    interval 5
+    ip-dscp 0
+    recv "Server [1-3]"
+    recv-disable none
+    send "GET /index.php\r\n"
+    time-until-up 0
+    timeout 16
+}
+ltm persistence source-addr /Common/configltm_src_persist {
+    app-service none
+    defaults-from /Common/source_addr
+    mask 255.255.0.0
+    timeout 30
+}

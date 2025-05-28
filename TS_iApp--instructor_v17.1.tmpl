@@ -1,0 +1,191 @@
+#TMSH-VERSION: 17.1.0
+
+cli admin-partitions {
+    update-partition Common
+}
+cli script /Common/trainingLib.app_utils {
+# ---------------------------------------------------------------------------
+#    ___  _
+#   |   \(_)___ __ _____ _____ _ _ _  _
+#   | |) | (_-</ _/ _ \ V / -_) '_| || |
+#   |___/|_/__/\__\___/\_/\___|_|  \_, |
+#                                  |__/
+#
+# Query for items such as the hostname or the 3rd octet of the management IP.
+
+ # PROC_MGMT_IP3
+ # What is the 3rd octet from the mgmt ip address?
+ proc proc_mgmt_ip3 {}
+ {
+  set mgmt_string [tmsh::list "sys management-ip"]       
+  set mgmt1 [split $mgmt_string "."]
+  set mgmt_ip [lindex $mgmt1 2]
+
+  set station_list [ format "%s \n 1 \n 2 \n 3 \n 4 \n 5 \n 6 \n 7 \n 8 \n 9 \n 10 \n 11 \n 12 \n 13 \n 14 \n 15 \n 16 \n 17" $mgmt_ip ]
+
+  return $station_list
+ }
+
+ # PROC_SELF_IP3
+ # What is the 3rd octet from the self ip address?
+ proc proc_self_ip3 {}
+ {
+  set self_ip_string [tmsh::list "net self"]       
+  set self1 [split $self_ip_string "."]
+  set selfip [lindex $self1 2]
+
+  set station_list [ format "%s \n 1 \n 2 \n 3 \n 4 \n 5 \n 6 \n 7 \n 8 \n 9 \n 10 \n 11 \n 12 \n 13 \n 14 \n 15 \n 16" $selfip ]
+
+  return $station_list
+ }
+
+ # PROC_GET_HOSTNAME
+ # Get the hostname.
+ proc proc_get_hostname {}
+ {
+  set ret [tmsh::list "/sys global-settings hostname"]
+  set man [lindex $ret 2]
+  set count [expr [llength $man] - 1]
+  return [lindex $man $count]
+ }
+    app-service none
+    description none
+    ignore-verification false
+    script-checksum none
+    script-signature none
+    signing-key none
+}
+sys application apl-script /Common/trainingLib.apl_library {
+script {
+# define elements go here
+}
+}
+sys application template /Common/TS_InstructorSetup {
+    actions {
+        definition {
+            html-help {
+            }
+            implementation {
+                # Version 1.01, 2013-11-25
+#
+# Include the implementation scripts.
+ tmsh::include "trainingLib.app_utils"
+
+ # Save the options in local variables.
+ set option $::options__lab
+ set station_id $::options__station
+ set hostname [proc_get_hostname]
+
+ # What option was chosen?
+ switch $option
+ {
+  "Instructor_8.2"
+  {
+   # 8.2 instructor modifications - add the dup IPs, no modification
+   # of the main configuration.
+   for {set i 1} {$i < 17} {incr i}
+   {
+    if {$i != $station_id}
+    {
+     tmsh::create "/net self /Common/172.16.$i.33 address 172.16.$i.33/16 vlan internal allow-service default traffic-group traffic-group-1"
+    }
+   }
+
+   # Create the TS_8.2 script file in the /shared directory.
+   # The instructor will execute the script separately.
+   set filename "/shared/TS_8.2"
+   set script_data "\
+#!/bin/bash\n\
+while :\n\
+do\n\
+  echo \"Type ^C to exit, otherwise I keep looping ...\"\n\
+  echo \"Best to end it when the unit is online, then reconfigure the iApp\"\n\
+  echo \"to cleanup lab 8.2.\"\n\
+  echo \"Setting the unit offline.\"\n\
+  tmsh run /sys failover offline\n\
+  sleep $::options__offline\n\
+  echo \"Setting the unit online.\"\n\
+  tmsh run /sys failover online\n\
+  sleep $::options__online\n\
+done\n\
+exit 0\n\
+" 
+   # Open the file for writing.
+   set fileID [open $filename "w"]
+   # Write the data to the file.
+   puts -nonewline $fileID $script_data
+   # Close the file.
+   close $fileID
+   # Set the permissions for the file.
+   file attributes $filename -permissions 0755
+  }
+
+  "Cleanup_8.2"
+  {
+  # Reset to the base configuration.
+
+   # Remove the bash script file.
+   set filename "/shared/TS_8.2"
+   file delete $filename
+
+   # 8.2 instructor modifications removal.
+   for {set i 1} {$i < 17} {incr i}
+   {
+    if {$i != $station_id}
+    {
+     tmsh::delete "/net self /Common/172.16.$i.33"
+    }
+   }
+   # Delete the file created for this lab.
+   file delete "/shared/TS_8.2"
+  }
+
+ }
+ # END - switch
+
+ tmsh::modify "/sys application service ${tmsh::app_name} strict-updates disabled"
+ # tmsh::save "/sys config"
+            }
+            macro {
+            }
+            presentation {
+                # Include the presentation scripts.
+ include "/Common/trainingLib.apl_library"
+
+ section options
+ {
+  choice station tcl { tmsh::run_proc trainingLib.app_utils:proc_mgmt_ip3 }
+  choice lab { "Instructor_8.2", "Cleanup_8.2" }
+  optional (options.lab == "Instructor_8.2")
+  {
+   message instruct1 "Script TS_8.2 will be created in the /shared directory. Execute the script to make the problem intermittent."
+   message instruct2 "Set the values for the intermittent problem. When the device is offline, the problem is not in effect; when online the problem exists."
+   string offline validator "NonNegativeNumber" default "20"
+   string online validator "NonNegativeNumber" default "20"
+  }
+ }
+
+ text
+ {
+  options "Setup Options"
+  options.station "Which Station are you?"
+  options.lab "What would you like to do?"
+  options.instruct1 "READ THIS"
+  options.instruct2 " "
+  options.offline "How long should the unit remain offline (seconds)?"
+  options.online "How long should the unit remain online (seconds)?"
+ }
+            }
+            role-acl none
+            run-as none
+        }
+    }
+    description none
+    ignore-verification false
+    requires-bigip-version-max none
+    requires-bigip-version-min none
+    requires-modules none
+    signing-key none
+    tmpl-checksum none
+    tmpl-signature none
+}
