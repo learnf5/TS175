@@ -1,5 +1,7 @@
 #TMSH-VERSION: 17.5.0
 
+# Updated: July 30, 2025
+
 cli admin-partitions {
     update-partition Common
 }
@@ -66,7 +68,7 @@ sys application template /Common/TS_InstructorSetup {
             html-help {
             }
             implementation {
-                # Version 1.01, 2013-11-25
+                # Version 1.02, 2025-07-30
 #
 # Include the implementation scripts.
  tmsh::include "trainingLib.app_utils"
@@ -79,7 +81,7 @@ sys application template /Common/TS_InstructorSetup {
  # What option was chosen?
  switch $option
  {
-  "Instructor_8.2"
+  "Instructor_7.2"
   {
    # 8.2 instructor modifications - add the dup IPs, no modification
    # of the main configuration.
@@ -91,9 +93,9 @@ sys application template /Common/TS_InstructorSetup {
     }
    }
 
-   # Create the TS_8.2 script file in the /shared directory.
+   # Create the TS_7.2 script file in the /shared directory.
    # The instructor will execute the script separately.
-   set filename "/shared/TS_8.2"
+   set filename "/shared/TS_7.2"
    set script_data "\
 #!/bin/bash\n\
 while :\n\
@@ -120,15 +122,15 @@ exit 0\n\
    file attributes $filename -permissions 0755
   }
 
-  "Cleanup_8.2"
+  "Cleanup_7.2"
   {
   # Reset to the base configuration.
 
    # Remove the bash script file.
-   set filename "/shared/TS_8.2"
+   set filename "/shared/TS_7.2"
    file delete $filename
 
-   # 8.2 instructor modifications removal.
+   # 7.2 instructor modifications removal.
    for {set i 1} {$i < 17} {incr i}
    {
     if {$i != $station_id}
@@ -137,7 +139,7 @@ exit 0\n\
     }
    }
    # Delete the file created for this lab.
-   file delete "/shared/TS_8.2"
+   file delete "/shared/TS_7.2"
   }
 
  }
@@ -155,10 +157,10 @@ exit 0\n\
  section options
  {
   choice station tcl { tmsh::run_proc trainingLib.app_utils:proc_mgmt_ip3 }
-  choice lab { "Instructor_8.2", "Cleanup_8.2" }
-  optional (options.lab == "Instructor_8.2")
+  choice lab { "Instructor_7.2", "Cleanup_7.2" }
+  optional (options.lab == "Instructor_7.2")
   {
-   message instruct1 "Script TS_8.2 will be created in the /shared directory. Execute the script to make the problem intermittent."
+   message instruct1 "Script TS_7.2 will be created in the /shared directory. Execute the script to make the problem intermittent."
    message instruct2 "Set the values for the intermittent problem. When the device is offline, the problem is not in effect; when online the problem exists."
    string offline validator "NonNegativeNumber" default "20"
    string online validator "NonNegativeNumber" default "20"
